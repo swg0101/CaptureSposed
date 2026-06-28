@@ -29,8 +29,36 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build release APK
-        run: ./gradlew assembleRelease
+      - name: Generate debug keystore (for unsigned builds)
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Build release APK with debug signing
+        env:
+          ANDROID_KEYSTORE_PATH: ~/.android/debug.keystore
+          ANDROID_KEYSTORE_PASSWORD: android
+          ANDROID_KEY_ALIAS: androiddebugkey
+          ANDROID_KEY_PASSWORD: android
+        run: |
+          cat >> app/build.gradle.kts << 'EOF'
+
+          android.signingConfigs {
+              create("releaseSigning") {
+                  storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH") ?: "~/.android/debug.keystore")
+                  storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "android"
+                  keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "androiddebugkey"
+                  keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: "android"
+              }
+          }
+
+          android.buildTypes.release.signingConfig = android.signingConfigs["releaseSigning"]
+          EOF
+          ./gradlew assembleRelease
 
       - name: Find APK file
         id: find_apk
@@ -39,10 +67,16 @@ jobs:
           echo "apk_path=$APK" >> $GITHUB_OUTPUT
           echo "Found APK at: $APK"
 
+      - name: Verify APK is signed
+        run: |
+          APK=$(find app/build/outputs -name "*.apk" | head -1)
+          echo "APK: $APK"
+          unzip -l "$APK" | grep META-INF
+
       - name: Get version from build.gradle.kts
         id: get_version
         run: |
-          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | sed 's/.*"\(.*\)".*/\1/')
+          VERSION_NAME=$(grep 'versionName' app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
           echo "run_number=${{ github.run_number }}" >> $GITHUB_OUTPUT
 

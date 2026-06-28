@@ -38,30 +38,28 @@ jobs:
             -storepass android -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Get keystore absolute path
-        id: keystore
+      - name: Add signing config via init script
         run: |
-          echo "keystore_path=$(realpath ~/.android/debug.keystore)" >> $GITHUB_OUTPUT
-
-      - name: Inject signing config into build.gradle.kts
-        run: |
-          KEYSTORE_PATH="${{ steps.keystore.outputs.keystore_path }}"
-          # Insert signingConfigs block after android {
-          sed -i "/android {/a\\
-          signingConfigs {\
-              create(\"releaseSigning\") {\
-                  storeFile = file(\"$KEYSTORE_PATH\")\
-                  storePassword = \"android\"\
-                  keyAlias = \"androiddebugkey\"\
-                  keyPassword = \"android\"\
-              }\
-          }" app/build.gradle.kts
-          # Set release signing config inside release block
-          sed -i "/release {/a\\
-          signingConfig = signingConfigs.getByName(\"releaseSigning\")" app/build.gradle.kts
+          cat > signing.gradle.kts << 'GRADLE_EOF'
+          android {
+              signingConfigs {
+                  create("releaseSigning") {
+                      storeFile = file("/home/runner/.android/debug.keystore")
+                      storePassword = "android"
+                      keyAlias = "androiddebugkey"
+                      keyPassword = "android"
+                  }
+              }
+              buildTypes {
+                  getByName("release") {
+                      signingConfig = signingConfigs.getByName("releaseSigning")
+                  }
+              }
+          }
+          GRADLE_EOF
 
       - name: Build release APK
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleRelease -I signing.gradle.kts
 
       - name: Find APK file
         id: find_apk

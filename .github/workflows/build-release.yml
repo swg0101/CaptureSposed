@@ -7,6 +7,11 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: read
+  checks: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,6 +32,13 @@ jobs:
       - name: Build release APK
         run: ./gradlew assembleRelease
 
+      - name: Find APK file
+        id: find_apk
+        run: |
+          APK=$(find app/build/outputs -name "*.apk" | head -1)
+          echo "apk_path=$APK" >> $GITHUB_OUTPUT
+          echo "Found APK at: $APK"
+
       - name: Get version from build.gradle.kts
         id: get_version
         run: |
@@ -41,7 +53,8 @@ jobs:
           name: Release v${{ steps.get_version.outputs.version_name }}-${{ steps.get_version.outputs.run_number }}
           body: |
             Automated build from commit ${{ github.sha }}
-          files: app/build/outputs/apk/release/app-release.apk
+          files: ${{ steps.find_apk.outputs.apk_path }}
+          fail_on_unmatched_files: false
           draft: false
           prerelease: false
         env:

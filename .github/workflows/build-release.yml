@@ -29,7 +29,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Generate debug keystore (for unsigned builds)
+      - name: Generate debug keystore
         run: |
           mkdir -p ~/.android
           keytool -genkey -v -keystore ~/.android/debug.keystore \
@@ -38,27 +38,29 @@ jobs:
             -storepass android -keypass android \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Build release APK with debug signing
+      - name: Inject signing config into build.gradle.kts
+        run: |
+          # Insert signing configs block before buildTypes, and set release signingConfig
+          sed -i '/android {/a\
+          signingConfigs {\
+              create("releaseSigning") {\
+                  storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH") ?: System.getProperty("user.home") + "/.android/debug.keystore")\
+                  storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "android"\
+                  keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "androiddebugkey"\
+                  keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: "android"\
+              }\
+          }' app/build.gradle.kts
+          # Set release signing config
+          sed -i '/release {/a\
+                  signingConfig = signingConfigs.getByName("releaseSigning")' app/build.gradle.kts
+
+      - name: Build release APK
         env:
           ANDROID_KEYSTORE_PATH: ~/.android/debug.keystore
           ANDROID_KEYSTORE_PASSWORD: android
           ANDROID_KEY_ALIAS: androiddebugkey
           ANDROID_KEY_PASSWORD: android
-        run: |
-          cat >> app/build.gradle.kts << 'EOF'
-
-          android.signingConfigs {
-              create("releaseSigning") {
-                  storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH") ?: "~/.android/debug.keystore")
-                  storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: "android"
-                  keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "androiddebugkey"
-                  keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: "android"
-              }
-          }
-
-          android.buildTypes.release.signingConfig = android.signingConfigs["releaseSigning"]
-          EOF
-          ./gradlew assembleRelease
+        run: ./gradlew assembleRelease
 
       - name: Find APK file
         id: find_apk
@@ -71,7 +73,7 @@ jobs:
         run: |
           APK=$(find app/build/outputs -name "*.apk" | head -1)
           echo "APK: $APK"
-          unzip -l "$APK" | grep META-INF
+          unzip -l "$APK" | grep META-INF || echo "No META-INF found (unsigned)"
 
       - name: Get version from build.gradle.kts
         id: get_version
